@@ -124,12 +124,12 @@ export default function MaterialViewerScreen() {
               >
                 <Icon as={ZoomOut} size={18} className="text-foreground" />
               </Pressable>
-              <Pressable
+              {/* <Pressable
                 onPress={handleResetZoom}
                 className="h-9 w-9 items-center justify-center rounded-lg bg-secondary active:bg-secondary/80"
               >
                 <Icon as={Maximize2} size={18} className="text-foreground" />
-              </Pressable>
+              </Pressable> */}
               <Pressable
                 onPress={handleZoomIn}
                 className="h-9 w-9 items-center justify-center rounded-lg bg-secondary active:bg-secondary/80"
