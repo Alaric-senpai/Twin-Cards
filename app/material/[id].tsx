@@ -1,23 +1,31 @@
 import * as React from 'react';
-import { View, Pressable, ActivityIndicator, Platform } from 'react-native';
+import { View, Pressable, ActivityIndicator, Platform, Dimensions } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Text } from '@/components/ui/text';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
 import { 
-  ChevronLeft, ExternalLink, FileText, AlertCircle, RefreshCw 
+  ChevronLeft, ExternalLink, FileText, AlertCircle, RefreshCw,
+  ZoomIn, ZoomOut, Maximize2
 } from 'lucide-react-native';
 import { useMaterial } from '@/hooks/useDatabase';
 import { Skeleton } from '@/components/ui/skeleton';
 import * as Sharing from 'expo-sharing';
 import { WebView } from 'react-native-webview';
+import Pdf from 'react-native-pdf';
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 export default function MaterialViewerScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { material, isLoading } = useMaterial(id!);
 
-  const [webViewError, setWebViewError] = React.useState(false);
+  const [pdfError, setPdfError] = React.useState(false);
+  const [currentPage, setCurrentPage] = React.useState(1);
+  const [totalPages, setTotalPages] = React.useState(0);
+  const [scale, setScale] = React.useState(1.0);
+  const [useWebViewFallback, setUseWebViewFallback] = React.useState(false);
   const [webViewLoading, setWebViewLoading] = React.useState(true);
   const webViewRef = React.useRef<WebView>(null);
 
@@ -38,10 +46,13 @@ export default function MaterialViewerScreen() {
   };
 
   const handleRetry = () => {
-    setWebViewError(false);
-    setWebViewLoading(true);
-    webViewRef.current?.reload();
+    setPdfError(false);
+    setUseWebViewFallback(false);
   };
+
+  const handleZoomIn = () => setScale(prev => Math.min(prev + 0.2, 3.0));
+  const handleZoomOut = () => setScale(prev => Math.max(prev - 0.2, 0.5));
+  const handleResetZoom = () => setScale(1.0);
 
   if (isLoading) {
     return (
@@ -78,7 +89,7 @@ export default function MaterialViewerScreen() {
     <View className="flex-1 bg-background">
       {/* Header */}
       <View className="px-4 py-4 mt-6 border-b border-border">
-        <View className="flex-row items-center justify-between">
+        <View className="flex-row items-center justify-between mb-2">
           <View className="flex-row items-center flex-1">
             <Pressable 
               onPress={() => router.back()} 
@@ -102,30 +113,67 @@ export default function MaterialViewerScreen() {
             <Icon as={ExternalLink} size={20} className="text-foreground" />
           </Pressable>
         </View>
+
+        {/* PDF Controls */}
+        {isPDF && !pdfError && !useWebViewFallback && (
+          <View className="flex-row items-center justify-between mt-3">
+            <View className="flex-row items-center gap-2">
+              <Pressable
+                onPress={handleZoomOut}
+                className="h-9 w-9 items-center justify-center rounded-lg bg-secondary active:bg-secondary/80"
+              >
+                <Icon as={ZoomOut} size={18} className="text-foreground" />
+              </Pressable>
+              <Pressable
+                onPress={handleResetZoom}
+                className="h-9 w-9 items-center justify-center rounded-lg bg-secondary active:bg-secondary/80"
+              >
+                <Icon as={Maximize2} size={18} className="text-foreground" />
+              </Pressable>
+              <Pressable
+                onPress={handleZoomIn}
+                className="h-9 w-9 items-center justify-center rounded-lg bg-secondary active:bg-secondary/80"
+              >
+                <Icon as={ZoomIn} size={18} className="text-foreground" />
+              </Pressable>
+            </View>
+            
+            {totalPages > 0 && (
+              <Text className="text-sm font-medium text-muted-foreground">
+                Page {currentPage} of {totalPages}
+              </Text>
+            )}
+          </View>
+        )}
       </View>
 
       {/* Content */}
       <View className="flex-1">
         {isPDF ? (
-          webViewError ? (
+          pdfError ? (
             <View className="flex-1 items-center justify-center p-6">
               <Icon as={AlertCircle} size={64} className="text-destructive mb-4" />
               <Text className="text-xl font-bold text-foreground mb-2">Unable to display PDF</Text>
               <Text className="text-sm text-muted-foreground mb-6 text-center">
-                This PDF couldn't be loaded in-app. Open it in an external PDF reader for the best experience.
+                {useWebViewFallback 
+                  ? "This PDF couldn't be loaded. Try opening it in an external PDF reader."
+                  : "There was an error loading this PDF file."}
               </Text>
               <View className="flex-row gap-3 w-full max-w-sm">
-                <Button onPress={handleRetry} variant="outline" className="flex-1 h-12 rounded-xl">
-                  <Icon as={RefreshCw} size={18} className="mr-2 text-foreground" />
-                  <Text className="font-bold">Retry</Text>
-                </Button>
+                {!useWebViewFallback && (
+                  <Button onPress={() => setUseWebViewFallback(true)} variant="outline" className="flex-1 h-12 rounded-xl">
+                    <Icon as={RefreshCw} size={18} className="mr-2 text-foreground" />
+                    <Text className="font-bold">Try WebView</Text>
+                  </Button>
+                )}
                 <Button onPress={handleOpenExternal} className="flex-1 h-12 rounded-xl">
                   <Icon as={ExternalLink} size={18} className="mr-2 text-primary-foreground" />
                   <Text className="font-bold">Open External</Text>
                 </Button>
               </View>
             </View>
-          ) : (
+          ) : useWebViewFallback ? (
+            // WebView Fallback
             <View className="flex-1">
               {webViewLoading && (
                 <View className="absolute inset-0 items-center justify-center bg-background z-10">
@@ -138,32 +186,54 @@ export default function MaterialViewerScreen() {
                 source={{ uri: material.fileUri }}
                 onLoadStart={() => setWebViewLoading(true)}
                 onLoadEnd={() => setWebViewLoading(false)}
-                onError={(syntheticEvent) => {
-                  const { nativeEvent } = syntheticEvent;
-                  console.error('WebView error:', nativeEvent);
-                  setWebViewError(true);
+                onError={() => {
+                  setPdfError(true);
                   setWebViewLoading(false);
-                }}
-                onHttpError={(syntheticEvent) => {
-                  const { nativeEvent } = syntheticEvent;
-                  console.error('WebView HTTP error:', nativeEvent);
-                  // Don't set error for HTTP errors as they might be false positives
                 }}
                 style={{ flex: 1, backgroundColor: '#1E293B' }}
                 javaScriptEnabled={true}
                 domStorageEnabled={true}
                 scalesPageToFit={true}
-                bounces={false}
-                scrollEnabled={true}
-                showsVerticalScrollIndicator={true}
-                showsHorizontalScrollIndicator={false}
                 allowFileAccess={true}
                 allowFileAccessFromFileURLs={true}
                 allowUniversalAccessFromFileURLs={true}
                 originWhitelist={['*']}
-                mixedContentMode="always"
               />
             </View>
+          ) : (
+            // Native PDF Viewer
+            <Pdf
+              trustAllCerts={false}
+              source={{ uri: material.fileUri, cache: true }}
+              onLoadComplete={(numberOfPages) => {
+                setTotalPages(numberOfPages);
+                setPdfError(false);
+              }}
+              onPageChanged={(page) => {
+                setCurrentPage(page);
+              }}
+              onError={(error) => {
+                console.error('PDF Error:', error);
+                setPdfError(true);
+              }}
+              style={{
+                flex: 1,
+                width: SCREEN_WIDTH,
+                height: SCREEN_HEIGHT,
+              }}
+              scale={scale}
+              minScale={0.5}
+              maxScale={3.0}
+              enablePaging
+              horizontal={false}
+              spacing={10}
+              renderActivityIndicator={() => (
+                <View className="flex-1 items-center justify-center">
+                  <ActivityIndicator size="large" color="#FF6B6B" />
+                  <Text className="mt-4 text-sm text-muted-foreground">Loading PDF...</Text>
+                </View>
+              )}
+            />
           )
         ) : (
           // PPTX - Enhanced external app prompt
