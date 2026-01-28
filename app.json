@@ -24,7 +24,8 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo.png",
         "backgroundColor": "#0F172A"
-      }
+      },
+      "package": "com.alaric987.twincards"
     },
     "web": {
       "bundler": "metro",

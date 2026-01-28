@@ -1,6 +1,6 @@
 # TwinCards
 
-![TwinCards Logo](./assets/logo.png)
+![TwinCards banner](./assets/banner.png)
 
 A modern, intuitive flashcard study application built with React Native and Expo. TwinCards helps students organize their study materials, create flashcards, and track their learning progress with a beautiful, gesture-driven interface.
 
