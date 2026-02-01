@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
 import { 
   Plus, Play, Trash2, Edit, ChevronLeft, FileSpreadsheet,
-  BookOpen, FileText, Clock, Target
+  BookOpen, FileText, Clock, Target, X, CheckSquare, Sparkles
 } from 'lucide-react-native';
 import { FlashcardItem } from '@/components/FlashcardItem';
 import { MaterialItem } from '@/components/MaterialItem';
@@ -15,8 +15,11 @@ import {
   useUnit,
   useFlashcards,
   useMaterials,
+  useFlashcardGroups,
   deleteUnit,
   deleteMaterial,
+  deleteMaterials,
+  deleteFlashcards,
   createMaterial,
   createFlashcard,
 } from '@/hooks/useDatabase';
@@ -29,14 +32,19 @@ import * as FileSystem from 'expo-file-system/legacy';
 export default function UnitDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const [activeTab, setActiveTab] = React.useState<'flashcards' | 'library'>('flashcards');
+  const [activeTab, setActiveTab] = React.useState<'flashcards' | 'library' | 'groups'>('flashcards');
   const [isImporting, setIsImporting] = React.useState(false);
+
+  // Selection state
+  const [selectionMode, setSelectionMode] = React.useState<'none' | 'flashcards' | 'library'>('none');
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
 
   const { unit, isLoading: isUnitLoading } = useUnit(id!);
   const { flashcards, isLoading: isFlashcardsLoading } = useFlashcards(id!);
   const { materials, isLoading: isMaterialsLoading } = useMaterials(id!);
+  const { groups, isLoading: isGroupsLoading } = useFlashcardGroups(id!);
 
-  const isLoading = isUnitLoading || isFlashcardsLoading || isMaterialsLoading;
+  const isLoading = isUnitLoading || isFlashcardsLoading || isMaterialsLoading || isGroupsLoading;
 
   const handleDelete = async () => {
     if (!id) return;
@@ -97,33 +105,96 @@ export default function UnitDetailScreen() {
   const handleAddMaterial = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: ['application/pdf', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+        type: [
+          'application/pdf',
+          'application/vnd.ms-powerpoint',
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        ],
         copyToCacheDirectory: true,
+        multiple: true,
       });
 
-      if (result.canceled || !result.assets[0]) return;
+      if (result.canceled || !result.assets) return;
 
-      const file = result.assets[0];
-      const fileExtension = file.name.split('.').pop()?.toLowerCase();
-      const fileType = fileExtension === 'pdf' ? 'pdf' : 'pptx';
+      for (const file of result.assets) {
+        try {
+          const fileExtension = file.name.split('.').pop()?.toLowerCase();
+          const fileType = fileExtension === 'pdf' ? 'pdf' : 'pptx';
 
-      const materialsDir = `${FileSystem.documentDirectory}materials/`;
-      await FileSystem.makeDirectoryAsync(materialsDir, { intermediates: true });
+          const materialsDir = `${FileSystem.documentDirectory}materials/`;
+          await FileSystem.makeDirectoryAsync(materialsDir, { intermediates: true });
 
-      const newFileName = `${generateId()}.${fileExtension}`;
-      const newFileUri = `${materialsDir}${newFileName}`;
-      await FileSystem.copyAsync({ from: file.uri, to: newFileUri });
+          const newFileName = `${generateId()}.${fileExtension}`;
+          const newFileUri = `${materialsDir}${newFileName}`;
+          await FileSystem.copyAsync({ from: file.uri, to: newFileUri });
 
-      await createMaterial({
-        unitId: id!,
-        fileUri: newFileUri,
-        fileName: file.name,
-        fileType,
-        fileSize: file.size,
-      });
+          await createMaterial({
+            unitId: id!,
+            fileUri: newFileUri,
+            fileName: file.name,
+            fileType,
+            fileSize: file.size,
+          });
+        } catch (fileError) {
+          console.error(`Failed to process file ${file.name}:`, fileError);
+        }
+      }
     } catch (error) {
-      console.error('Failed to add material:', error);
+      console.error('Failed to add materials:', error);
+      Alert.alert('Error', 'Failed to upload materials. Please try again.');
     }
+  };
+
+  const toggleSelection = (itemId: string) => {
+    const newSelected = new Set(selectedIds);
+    if (newSelected.has(itemId)) {
+      newSelected.delete(itemId);
+      if (newSelected.size === 0) {
+        setSelectionMode('none');
+      }
+    } else {
+      newSelected.add(itemId);
+    }
+    setSelectedIds(newSelected);
+  };
+
+  const exitSelectionMode = () => {
+    setSelectionMode('none');
+    setSelectedIds(new Set());
+  };
+
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) return;
+
+    const itemsLabel = selectionMode === 'flashcards' ? 'flashcards' : 'materials';
+    Alert.alert(
+      `Delete ${selectedIds.size} ${itemsLabel}`,
+      `Are you sure you want to delete the selected ${itemsLabel}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const idsToDelete = Array.from(selectedIds);
+            if (selectionMode === 'flashcards') {
+              await deleteFlashcards(idsToDelete);
+            } else if (selectionMode === 'library') {
+              const selectedMaterials = materials.filter(m => selectedIds.has(m.id));
+              for (const material of selectedMaterials) {
+                try {
+                  await FileSystem.deleteAsync(material.fileUri, { idempotent: true });
+                } catch (e) {
+                  console.error('Failed to delete file:', material.fileUri);
+                }
+              }
+              await deleteMaterials(idsToDelete);
+            }
+            exitSelectionMode();
+          },
+        },
+      ]
+    );
   };
 
   const handleDeleteMaterial = async (materialId: string, fileUri: string) => {
@@ -134,9 +205,6 @@ export default function UnitDetailScreen() {
       console.error('Failed to delete material:', error);
     }
   };
-
-  console.log(isLoading)
-  console.log(unit)
 
   // Show loading state FIRST before checking if unit exists
   if (isLoading || unit === undefined) {
@@ -165,6 +233,7 @@ export default function UnitDetailScreen() {
         {/* Tabs Skeleton */}
         <View className="px-4 py-3 border-b border-border">
           <View className="flex-row gap-4">
+            <Skeleton className="h-10 flex-1 rounded-xl" />
             <Skeleton className="h-10 flex-1 rounded-xl" />
             <Skeleton className="h-10 flex-1 rounded-xl" />
           </View>
@@ -202,72 +271,96 @@ export default function UnitDetailScreen() {
   return (
     <View className="flex-1 bg-background">
       {/* Header */}
-      <View className="px-4 py-4 mt-6">
-        <View className="flex-row items-center justify-between mb-4">
-          <View className="flex-row items-center flex-1">
+      {selectionMode !== 'none' ? (
+        <View className="px-4 py-4 mt-6 flex-row items-center justify-between bg-primary/5 border-b border-primary/20">
+          <View className="flex-row items-center">
             <Pressable 
-              onPress={() => router.back()} 
-              className="h-10 w-10 items-center justify-center rounded-full active:bg-muted mr-3"
+              onPress={exitSelectionMode} 
+              className="h-10 w-10 items-center justify-center rounded-full active:bg-primary/10 mr-3"
             >
-              <Icon as={ChevronLeft} size={26} className="text-foreground" />
+              <Icon as={X} size={26} className="text-primary" />
             </Pressable>
-            <View className="flex-1">
-              <Text className="text-2xl font-bold text-foreground" numberOfLines={1}>
-                {unit.title}
-              </Text>
-              {unit.description && (
-                <Text className="text-sm text-muted-foreground mt-0.5" numberOfLines={1}>
-                  {unit.description}
-                </Text>
-              )}
-            </View>
+            <Text className="text-xl font-bold text-foreground">
+              {selectedIds.size} Selected
+            </Text>
           </View>
-          <View className="flex-row gap-2 ml-2">
+          <View className="flex-row gap-2">
             <Pressable
-              onPress={() => router.push(`/unit/edit/${id}`)}
-              className="h-10 w-10 items-center justify-center rounded-full active:bg-muted"
+              onPress={handleBatchDelete}
+              className="h-10 w-10 items-center justify-center rounded-full active:bg-destructive/10"
             >
-              <Icon as={Edit} size={20} className="text-foreground" />
-            </Pressable>
-            <Pressable 
-              onPress={handleDelete} 
-              className="h-10 w-10 items-center justify-center rounded-full active:bg-muted"
-            >
-              <Icon as={Trash2} size={20} className="text-destructive" />
+              <Icon as={Trash2} size={22} className="text-destructive" />
             </Pressable>
           </View>
         </View>
+      ) : (
+        <View className="px-4 py-4 mt-6">
+          <View className="flex-row items-center justify-between mb-4">
+            <View className="flex-row items-center flex-1">
+              <Pressable 
+                onPress={() => router.back()} 
+                className="h-10 w-10 items-center justify-center rounded-full active:bg-muted mr-3"
+              >
+                <Icon as={ChevronLeft} size={26} className="text-foreground" />
+              </Pressable>
+              <View className="flex-1">
+                <Text className="text-2xl font-bold text-foreground" numberOfLines={1}>
+                  {unit.title}
+                </Text>
+                {unit.description && (
+                  <Text className="text-sm text-muted-foreground mt-0.5" numberOfLines={1}>
+                    {unit.description}
+                  </Text>
+                )}
+              </View>
+            </View>
+            <View className="flex-row gap-2 ml-2">
+              <Pressable
+                onPress={() => router.push(`/unit/edit/${id}`)}
+                className="h-10 w-10 items-center justify-center rounded-full active:bg-muted"
+              >
+                <Icon as={Edit} size={20} className="text-foreground" />
+              </Pressable>
+              <Pressable 
+                onPress={handleDelete} 
+                className="h-10 w-10 items-center justify-center rounded-full active:bg-muted"
+              >
+                <Icon as={Trash2} size={20} className="text-destructive" />
+              </Pressable>
+            </View>
+          </View>
 
-        {/* Quick Stats */}
-        <View className="flex-row gap-3">
-          <Card className="flex-1 p-3 border-transparent bg-card">
-            <View className="flex-row items-center gap-2">
-              <View className="h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
-                <Icon as={BookOpen} size={16} className="text-primary" />
+          {/* Quick Stats */}
+          <View className="flex-row gap-3">
+            <Card className="flex-1 p-3 border-transparent bg-card">
+              <View className="flex-row items-center gap-2">
+                <View className="h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
+                  <Icon as={BookOpen} size={16} className="text-primary" />
+                </View>
+                <View className="flex-1">
+                  <Text className="text-xl font-bold text-foreground">{flashcards.length}</Text>
+                  <Text className="text-xs text-muted-foreground">Flashcards</Text>
+                </View>
               </View>
-              <View className="flex-1">
-                <Text className="text-xl font-bold text-foreground">{flashcards.length}</Text>
-                <Text className="text-xs text-muted-foreground">Flashcards</Text>
+            </Card>
+            
+            <Card className="flex-1 p-3 border-transparent bg-card">
+              <View className="flex-row items-center gap-2">
+                <View className="h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
+                  <Icon as={FileText} size={16} className="text-primary" />
+                </View>
+                <View className="flex-1">
+                  <Text className="text-xl font-bold text-foreground">{materials.length}</Text>
+                  <Text className="text-xs text-muted-foreground">Materials</Text>
+                </View>
               </View>
-            </View>
-          </Card>
-          
-          <Card className="flex-1 p-3 border-transparent bg-card">
-            <View className="flex-row items-center gap-2">
-              <View className="h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
-                <Icon as={FileText} size={16} className="text-primary" />
-              </View>
-              <View className="flex-1">
-                <Text className="text-xl font-bold text-foreground">{materials.length}</Text>
-                <Text className="text-xs text-muted-foreground">Materials</Text>
-              </View>
-            </View>
-          </Card>
+            </Card>
+          </View>
         </View>
-      </View>
+      )}
 
       {/* Tabs */}
-      <View className="px-4 py-3 border-b border-border">
+      <View className={`px-4 py-3 border-b border-border ${selectionMode !== 'none' ? 'opacity-50' : ''}`} pointerEvents={selectionMode !== 'none' ? 'none' : 'auto'}>
         <View className="flex-row gap-3">
           <Pressable
             onPress={() => setActiveTab('flashcards')}
@@ -278,10 +371,23 @@ export default function UnitDetailScreen() {
             <Text className={`font-bold ${
               activeTab === 'flashcards' ? 'text-primary-foreground' : 'text-secondary-foreground'
             }`}>
-              Flashcards
+              Cards
             </Text>
           </Pressable>
           
+          <Pressable
+            onPress={() => setActiveTab('groups')}
+            className={`flex-1 h-10 items-center justify-center rounded-xl ${
+              activeTab === 'groups' ? 'bg-primary' : 'bg-secondary'
+            }`}
+          >
+            <Text className={`font-bold ${
+              activeTab === 'groups' ? 'text-primary-foreground' : 'text-secondary-foreground'
+            }`}>
+              Groups
+            </Text>
+          </Pressable>
+
           <Pressable
             onPress={() => setActiveTab('library')}
             className={`flex-1 h-10 items-center justify-center rounded-xl ${
@@ -303,27 +409,40 @@ export default function UnitDetailScreen() {
           className="flex-1 px-4 pt-4"
           contentContainerClassName={flashcards.length === 0 ? 'flex-1' : ''}
         >
-          <View className="flex-row gap-3 mb-4">
-            <Button
-              onPress={handleImportCSV}
-              variant="outline"
-              className="flex-1 h-12 rounded-xl border-primary/20"
-              disabled={isImporting}
-            >
-              <Icon as={FileSpreadsheet} size={18} className="mr-2 text-primary" />
-              <Text className="text-primary font-bold text-sm">
-                {isImporting ? 'Importing...' : 'Import CSV'}
-              </Text>
-            </Button>
+          <View className="flex-col gap-3 mb-4">
+            <View className="flex-row gap-3">
+              <Button
+                onPress={handleImportCSV}
+                variant="outline"
+                className="flex-1 h-12 rounded-xl border-primary/20"
+                disabled={isImporting}
+              >
+                <Icon as={FileSpreadsheet} size={18} className="mr-2 text-primary" />
+                <Text className="text-primary font-bold text-sm">
+                  {isImporting ? 'Importing...' : 'Import CSV'}
+                </Text>
+              </Button>
+
+              {flashcards.length > 0 && (
+                <Button
+                  onPress={() => router.push(`/study/${id}`)}
+                  className="flex-1 h-12 rounded-xl shadow-md"
+                  variant="default"
+                >
+                  <Icon as={Play} size={18} className="mr-2 text-primary-foreground" />
+                  <Text className="text-primary-foreground font-bold text-sm">Study</Text>
+                </Button>
+              )}
+            </View>
 
             {flashcards.length > 0 && (
               <Button
-                onPress={() => router.push(`/study/${id}`)}
-                className="flex-1 h-12 rounded-xl shadow-md"
+                onPress={() => router.push({ pathname: '/ai-generate', params: { unitId: id } })}
+                className="h-12 rounded-xl shadow-md bg-accent w-full"
                 variant="default"
               >
-                <Icon as={Play} size={18} className="mr-2 text-primary-foreground" />
-                <Text className="text-primary-foreground font-bold text-sm">Study</Text>
+                <Icon as={Sparkles} size={18} className="mr-2 text-white" />
+                <Text className="text-white font-bold text-sm">Generate with AI</Text>
               </Button>
             )}
           </View>
@@ -342,8 +461,64 @@ export default function UnitDetailScreen() {
                   front={card.front}
                   back={card.back}
                   hint={card.hint || undefined}
-                  onPress={() => router.push(`/flashcard/edit/${card.id}`)}
+                  selectionMode={selectionMode === 'flashcards'}
+                  isSelected={selectedIds.has(card.id)}
+                  onPress={() => {
+                    if (selectionMode === 'flashcards') {
+                      toggleSelection(card.id);
+                    } else {
+                      router.push(`/flashcard/edit/${card.id}`);
+                    }
+                  }}
+                  onLongPress={() => {
+                    if (selectionMode === 'none') {
+                      setSelectionMode('flashcards');
+                      setSelectedIds(new Set([card.id]));
+                    }
+                  }}
                 />
+              ))}
+            </View>
+          )}
+          <View className="h-24" />
+        </ScrollView>
+      ) : activeTab === 'groups' ? (
+        <ScrollView 
+          className="flex-1 px-4 pt-4"
+          contentContainerClassName={groups.length === 0 ? 'flex-1' : ''}
+        >
+          {groups.length === 0 ? (
+            <EmptyState
+              title="No groups yet"
+              description="Create a group to organize your flashcards"
+            />
+          ) : (
+            <View className="gap-3 pb-4">
+              {groups.map((group) => (
+                <Pressable
+                  key={group.id}
+                  onPress={() => router.push(`/flashcard-groups/${group.id}`)}
+                >
+                  <Card className="flex-row items-center p-4 border-transparent bg-card">
+                    <View 
+                      className="h-10 w-10 rounded-lg items-center justify-center mr-3"
+                      style={{ backgroundColor: group.color || '#FF6B6B' }}
+                    >
+                      <Icon as={BookOpen} size={20} color="white" />
+                    </View>
+                    <View className="flex-1">
+                      <Text className="text-base font-bold text-foreground">
+                        {group.name}
+                      </Text>
+                      {group.description && (
+                        <Text className="text-sm text-muted-foreground" numberOfLines={1}>
+                          {group.description}
+                        </Text>
+                      )}
+                    </View>
+                    <Icon as={Plus} size={20} className="text-muted-foreground" />
+                  </Card>
+                </Pressable>
               ))}
             </View>
           )}
@@ -368,7 +543,21 @@ export default function UnitDetailScreen() {
                   fileName={material.fileName}
                   fileType={material.fileType}
                   fileSize={material.fileSize || undefined}
-                  onPress={() => router.push(`/material/${material.id}`)}
+                  selectionMode={selectionMode === 'library'}
+                  isSelected={selectedIds.has(material.id)}
+                  onPress={() => {
+                    if (selectionMode === 'library') {
+                      toggleSelection(material.id);
+                    } else {
+                      router.push(`/material/${material.id}`);
+                    }
+                  }}
+                  onLongPress={() => {
+                    if (selectionMode === 'none') {
+                      setSelectionMode('library');
+                      setSelectedIds(new Set([material.id]));
+                    }
+                  }}
                 />
               ))}
             </View>
@@ -378,25 +567,29 @@ export default function UnitDetailScreen() {
       )}
 
       {/* Floating Action Button */}
-      <Pressable
-        onPress={() => {
-          if (activeTab === 'flashcards') {
-            router.push({ pathname: '/flashcard/create', params: { unitId: id } });
-          } else {
-            handleAddMaterial();
-          }
-        }}
-        className="absolute bottom-6 right-6 h-16 w-16 items-center justify-center rounded-full bg-primary shadow-lg active:opacity-90"
-        style={{
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.3,
-          shadowRadius: 4.65,
-          elevation: 8,
-        }}
-      >
-        <Icon as={Plus} size={28} className="text-primary-foreground" />
-      </Pressable>
+      {selectionMode === 'none' && (
+        <Pressable
+          onPress={() => {
+            if (activeTab === 'flashcards') {
+              router.push({ pathname: '/flashcard/create', params: { unitId: id } });
+            } else if (activeTab === 'groups') {
+              router.push({ pathname: '/flashcard-groups/create', params: { unitId: id } });
+            } else {
+              handleAddMaterial();
+            }
+          }}
+          className="absolute bottom-6 right-6 h-16 w-16 items-center justify-center rounded-full bg-primary shadow-lg active:opacity-90"
+          style={{
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.3,
+            shadowRadius: 4.65,
+            elevation: 8,
+          }}
+        >
+          <Icon as={Plus} size={28} className="text-primary-foreground" />
+        </Pressable>
+      )}
     </View>
   );
 }

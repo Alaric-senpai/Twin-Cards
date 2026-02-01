@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'drizzle-orm/expo-sqlite';
-import { eq, desc, and } from 'drizzle-orm';
+import { eq, desc, and, inArray } from 'drizzle-orm';
 import { db, schema } from '@/db';
 import { generateId } from '@/utils/ids';
 import React from 'react';
@@ -8,7 +8,7 @@ import React from 'react';
 
 export function useUnits() {
     const { data: units, error } = useLiveQuery(
-        db.select().from(schema.units).orderBy(desc(schema.units.createdAt))
+        db().select().from(schema.units).orderBy(desc(schema.units.createdAt))
     );
 
     return {
@@ -21,7 +21,7 @@ export function useUnits() {
 export function useUnit(id: string) {
     const [isFirstLoad, setIsFirstLoad] = React.useState(true);
     const { data, error } = useLiveQuery(
-        db.select().from(schema.units).where(eq(schema.units.id, id))
+        db().select().from(schema.units).where(eq(schema.units.id, id))
     );
 
     React.useEffect(() => {
@@ -44,7 +44,7 @@ export async function createUnit(data: {
     icon?: string;
 }) {
     const id = generateId();
-    await db.insert(schema.units).values({
+    await db().insert(schema.units).values({
         id,
         ...data,
     });
@@ -60,7 +60,7 @@ export async function updateUnit(
         icon: string;
     }>
 ) {
-    await db
+    await db()
         .update(schema.units)
         .set({
             ...data,
@@ -70,14 +70,14 @@ export async function updateUnit(
 }
 
 export async function deleteUnit(id: string) {
-    await db.delete(schema.units).where(eq(schema.units.id, id));
+    await db().delete(schema.units).where(eq(schema.units.id, id));
 }
 
 // ============= FLASHCARDS =============
 
 export function useFlashcards(unitId: string) {
     const { data: flashcards, error } = useLiveQuery(
-        db
+        db()
             .select()
             .from(schema.flashcards)
             .where(eq(schema.flashcards.unitId, unitId))
@@ -93,7 +93,7 @@ export function useFlashcards(unitId: string) {
 
 export function useFlashcard(id: string) {
     const { data, error } = useLiveQuery(
-        db.select().from(schema.flashcards).where(eq(schema.flashcards.id, id))
+        db().select().from(schema.flashcards).where(eq(schema.flashcards.id, id))
     );
 
     return {
@@ -110,11 +110,30 @@ export async function createFlashcard(data: {
     hint?: string | null;
 }) {
     const id = generateId();
-    await db.insert(schema.flashcards).values({
+    await db().insert(schema.flashcards).values({
         id,
         ...data,
     });
     return id;
+}
+
+export async function createFlashcards(
+    cards: {
+        unitId: string;
+        front: string;
+        back: string;
+        hint?: string | null;
+    }[]
+) {
+    if (cards.length === 0) return [];
+
+    const insertions = cards.map((card) => ({
+        id: generateId(),
+        ...card,
+    }));
+
+    await db().insert(schema.flashcards).values(insertions);
+    return insertions.map((i) => i.id);
 }
 
 export async function updateFlashcard(
@@ -129,18 +148,23 @@ export async function updateFlashcard(
         reviewCount: number;
     }>
 ) {
-    await db.update(schema.flashcards).set(data).where(eq(schema.flashcards.id, id));
+    await db().update(schema.flashcards).set(data).where(eq(schema.flashcards.id, id));
 }
 
 export async function deleteFlashcard(id: string) {
-    await db.delete(schema.flashcards).where(eq(schema.flashcards.id, id));
+    await db().delete(schema.flashcards).where(eq(schema.flashcards.id, id));
+}
+
+export async function deleteFlashcards(ids: string[]) {
+    if (ids.length === 0) return;
+    await db().delete(schema.flashcards).where(inArray(schema.flashcards.id, ids));
 }
 
 // ============= MATERIALS =============
 
 export function useMaterials(unitId: string) {
     const { data: materials, error } = useLiveQuery(
-        db
+        db()
             .select()
             .from(schema.materials)
             .where(eq(schema.materials.unitId, unitId))
@@ -156,7 +180,7 @@ export function useMaterials(unitId: string) {
 
 export function useMaterial(id: string) {
     const { data, error } = useLiveQuery(
-        db.select().from(schema.materials).where(eq(schema.materials.id, id))
+        db().select().from(schema.materials).where(eq(schema.materials.id, id))
     );
 
     return {
@@ -174,7 +198,7 @@ export async function createMaterial(data: {
     fileSize?: number;
 }) {
     const id = generateId();
-    await db.insert(schema.materials).values({
+    await db().insert(schema.materials).values({
         id,
         ...data,
     });
@@ -182,17 +206,101 @@ export async function createMaterial(data: {
 }
 
 export async function deleteMaterial(id: string) {
-    await db.delete(schema.materials).where(eq(schema.materials.id, id));
+    await db().delete(schema.materials).where(eq(schema.materials.id, id));
+}
+
+export async function deleteMaterials(ids: string[]) {
+    if (ids.length === 0) return;
+    await db().delete(schema.materials).where(inArray(schema.materials.id, ids));
+}
+
+// ============= FLASHCARD GROUPS =============
+
+export function useFlashcardGroups(unitId: string) {
+    const { data: groups, error } = useLiveQuery(
+        db()
+            .select()
+            .from(schema.flashcardGroups)
+            .where(eq(schema.flashcardGroups.unitId, unitId))
+            .orderBy(desc(schema.flashcardGroups.createdAt))
+    );
+
+    return {
+        groups: groups || [],
+        error,
+        isLoading: groups === undefined && !error,
+    };
+}
+
+export function useAllFlashcardGroups() {
+    const { data: groups, error } = useLiveQuery(
+        db().select().from(schema.flashcardGroups).orderBy(desc(schema.flashcardGroups.createdAt))
+    );
+
+    return {
+        groups: groups || [],
+        error,
+        isLoading: groups === undefined && !error,
+    };
+}
+
+export function useFlashcardGroup(id: string) {
+    const { data, error } = useLiveQuery(
+        db().select().from(schema.flashcardGroups).where(eq(schema.flashcardGroups.id, id))
+    );
+
+    return {
+        group: data?.[0],
+        error,
+        isLoading: data === undefined && !error,
+    };
+}
+
+export function useFlashcardsByGroupId(groupId: string) {
+    const { data: flashcards, error } = useLiveQuery(
+        db()
+            .select({
+                flashcard: schema.flashcards,
+            })
+            .from(schema.flashcardGroupItems)
+            .innerJoin(
+                schema.flashcards,
+                eq(schema.flashcardGroupItems.flashcardId, schema.flashcards.id)
+            )
+            .where(eq(schema.flashcardGroupItems.groupId, groupId))
+            .orderBy(desc(schema.flashcardGroupItems.addedAt))
+    );
+
+    return {
+        flashcards: flashcards?.map((f) => f.flashcard) || [],
+        error,
+        isLoading: flashcards === undefined && !error,
+    };
 }
 
 // ============= STUDY SESSIONS =============
 
 export function useStudySessions(unitId: string) {
     const { data: sessions, error } = useLiveQuery(
-        db
+        db()
             .select()
             .from(schema.studySessions)
             .where(eq(schema.studySessions.unitId, unitId))
+            .orderBy(desc(schema.studySessions.createdAt))
+    );
+
+    return {
+        sessions: sessions || [],
+        error,
+        isLoading: sessions === undefined && !error,
+    };
+}
+
+export function useAllStudySessions() {
+    const { data: sessions, error } = useLiveQuery(
+        db()
+            .select()
+            .from(schema.studySessions)
             .orderBy(desc(schema.studySessions.createdAt))
     );
 
@@ -210,7 +318,7 @@ export async function createStudySession(data: {
     sessionDuration?: number;
 }) {
     const id = generateId();
-    await db.insert(schema.studySessions).values({
+    await db().insert(schema.studySessions).values({
         id,
         ...data,
     });

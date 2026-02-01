@@ -1,0 +1,1 @@
+ALTER TABLE `flashcard_groups` ADD `unit_id` text NOT NULL REFERENCES units(id);

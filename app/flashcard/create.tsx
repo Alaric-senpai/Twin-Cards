@@ -8,10 +8,11 @@ import { Icon } from '@/components/ui/icon';
 import { Textarea } from '@/components/ui/textarea';
 import { ChevronLeft } from 'lucide-react-native';
 import { createFlashcard } from '@/hooks/useDatabase';
+import { addFlashcardToGroup } from '@/db/services/flashcard-groups.service';
 
 export default function CreateFlashcardScreen() {
   const router = useRouter();
-  const { unitId } = useLocalSearchParams<{ unitId: string }>();
+  const { unitId, groupId } = useLocalSearchParams<{ unitId: string, groupId?: string }>();
   const [front, setFront] = React.useState('');
   const [back, setBack] = React.useState('');
   const [hint, setHint] = React.useState('');
@@ -22,12 +23,17 @@ export default function CreateFlashcardScreen() {
 
     setIsSubmitting(true);
     try {
-      await createFlashcard({
+      const cardId = await createFlashcard({
         unitId,
         front: front.trim(),
         back: back.trim(),
         hint: hint.trim() || undefined,
       });
+
+      if (groupId) {
+        await addFlashcardToGroup(groupId, cardId);
+      }
+      
       router.back();
     } catch (error) {
       console.error('Failed to create flashcard:', error);

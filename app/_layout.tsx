@@ -7,63 +7,75 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useColorScheme } from 'nativewind';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import * as React from 'react';
+import React, { useEffect, useState } from 'react';
 import { initializeDatabase } from '@/db';
-import { Container } from '@/components/Container';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { View, ActivityIndicator, Platform } from 'react-native';
 import * as NavigationBar from 'expo-navigation-bar';
-import { Platform, View } from 'react-native';
-
 export {
-  // Catch any errors thrown by the Layout component.
   ErrorBoundary,
 } from 'expo-router';
 
 export default function RootLayout() {
-  const { colorScheme } = useColorScheme();
-  const [dbReady, setDbReady] = React.useState(false);
+    const { colorScheme } = useColorScheme();
+    const [dbReady, setDbReady] = useState(false);
 
-  // Initialize database and system UI on app start
-  React.useEffect(() => {
-    // Initialize database
-    initializeDatabase().then((success) => {
-      setDbReady(success);
-    });
+    // Hide system navigation bar as early as possible
+    React.useLayoutEffect(() => {
+        if (Platform.OS === 'android') {
+            NavigationBar.setVisibilityAsync('hidden').catch(() => {});
+            NavigationBar.setBehaviorAsync('inset-touch').catch(() => {});
+        }
+    }, []);
 
-    // Hide navigation bar on Android
-    if (Platform.OS === 'android') {
-      try {
-        NavigationBar.setVisibilityAsync('hidden');
-        NavigationBar.setBehaviorAsync('inset-touch');
-      } catch (e) {
-        console.error('Failed to set navigation bar visibility', e);
-      }
-    }
-  }, []);
+    useEffect(() => {
+        const setup = async () => {
+            try {
+                await initializeDatabase();
+                setDbReady(true);
+            } catch (error) {
+                console.error('❌ Database setup failed:', error);
+                setDbReady(true); // Proceed anyway to see error
+            }
+        };
+        setup();
+    }, []);
 
-  if (!dbReady) {
-    return null; // Or a loading screen
-  }
+    const theme = NAV_THEME[colorScheme ?? 'light'];
 
-  const theme = NAV_THEME[colorScheme ?? 'light'];
-
-  return (
-    <GestureHandlerRootView style={{ flex: 1, backgroundColor: theme.colors.background }}>
-      <Container>
-        <ThemeProvider value={theme}>
-          <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} translucent hideTransitionAnimation={'none'} />
-          <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.colors.background } }}>
-            <Stack.Screen name="index" />
-            <Stack.Screen name="unit/[id]" />
-            <Stack.Screen name="unit/create" />
-            <Stack.Screen name="unit/edit/[id]" />
-            <Stack.Screen name="flashcard/create" />
-            <Stack.Screen name="flashcard/edit/[id]" />
-            <Stack.Screen name="study/[unitId]" />
-            <Stack.Screen name="material/[id]" />
-          </Stack>
-          <PortalHost />
-        </ThemeProvider>
-      </Container>
-    </GestureHandlerRootView>
-  );
+    return (
+        <GestureHandlerRootView style={{ flex: 1, backgroundColor: theme.colors.background }}>
+            <SafeAreaProvider>
+                <ThemeProvider value={theme}>
+                    <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
+                    {!dbReady ? (
+                        <View className="flex-1 items-center justify-center bg-background">
+                            <ActivityIndicator size="large" color="#FF6B6B" />
+                        </View>
+                    ) : (
+                        <Stack
+                            screenOptions={{
+                                headerShown: false,
+                                contentStyle: { backgroundColor: theme.colors.background },
+                            }}
+                        >
+                            <Stack.Screen name="(tabs)" />
+                            <Stack.Screen name="unit/[id]" />
+                            <Stack.Screen name="unit/create" />
+                            <Stack.Screen name="unit/edit/[id]" />
+                            <Stack.Screen name="flashcard/create" />
+                            <Stack.Screen name="flashcard/edit/[id]" />
+                            <Stack.Screen name="study/[unitId]" />
+                            <Stack.Screen name="material/[id]" />
+                            <Stack.Screen name="flashcard-groups/index" />
+                            <Stack.Screen name="flashcard-groups/create" />
+                            <Stack.Screen name="flashcard-groups/[id]" />
+                            <Stack.Screen name="ai-generate/index" />
+                        </Stack>
+                    )}
+                    <PortalHost />
+                </ThemeProvider>
+            </SafeAreaProvider>
+        </GestureHandlerRootView>
+    );
 }

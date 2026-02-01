@@ -224,9 +224,10 @@ export default function MaterialViewerScreen() {
               scale={scale}
               minScale={0.5}
               maxScale={3.0}
-              enablePaging
+              enablePaging={false}
               horizontal={false}
-              spacing={10}
+              spacing={0}
+              enableDoubleTapZoom
               renderActivityIndicator={() => (
                 <View className="flex-1 items-center justify-center">
                   <ActivityIndicator size="large" color="#FF6B6B" />
@@ -266,3 +267,6 @@ export default function MaterialViewerScreen() {
     </View>
   );
 }
+
+
+

@@ -11,15 +11,23 @@ interface MaterialItemProps {
   fileType: string;
   fileSize?: number;
   onPress: () => void;
+  onLongPress?: () => void;
+  selectionMode?: boolean;
+  isSelected?: boolean;
 }
 
-export function MaterialItem({ fileName, fileType, fileSize, onPress }: MaterialItemProps) {
+export function MaterialItem({ fileName, fileType, fileSize, onPress, onLongPress, selectionMode, isSelected }: MaterialItemProps) {
   const IconComponent = fileType === 'pdf' ? FileText : FileSpreadsheet;
   const formattedSize = fileSize ? formatFileSize(fileSize) : null;
 
   return (
-    <Pressable onPress={onPress}>
-      <Card className="mb-2 flex-row items-center p-4">
+    <Pressable onPress={onPress} onLongPress={onLongPress}>
+      <Card className={`mb-2 flex-row items-center p-4 ${isSelected ? 'border-primary bg-primary/5' : ''}`}>
+        {selectionMode && (
+          <View className={`mr-3 h-5 w-5 rounded-full border-2 items-center justify-center ${isSelected ? 'bg-primary border-primary' : 'border-muted-foreground/30'}`}>
+            {isSelected && <View className="h-2 w-2 rounded-full bg-white" />}
+          </View>
+        )}
         <View className="mr-3 h-10 w-10 items-center justify-center rounded-lg bg-accent/10">
           <Icon as={IconComponent} size={20} className="text-accent" />
         </View>
